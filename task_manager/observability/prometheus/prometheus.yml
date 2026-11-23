@@ -1,0 +1,20 @@
+# Prometheus pulls ("scrapes") metrics. It doesn't receive pushes from the apps:
+# the apps push to the collector, and Prometheus reads the collector's /metrics page.
+# Retention (7d) is set with a command-line flag in docker-compose.yml.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: otel-collector
+    # Keep the job/instance labels the collector puts on each series
+    # (job = service name, instance = host-pid) instead of overwriting them
+    # with "otel-collector" / "otel-collector:8889".
+    honor_labels: true
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  - job_name: prometheus   # Prometheus's own health, handy for comparison
+    static_configs:
+      - targets: ["localhost:9090"]

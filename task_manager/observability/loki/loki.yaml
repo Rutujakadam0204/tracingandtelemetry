@@ -1,0 +1,56 @@
+# Loki in single-binary mode: receives log records (OTLP at /otlp), stores them
+# on local disk, and answers Grafana's LogQL queries. Not published to the host.
+
+auth_enabled: false   # single tenant
+
+server:
+  http_listen_port: 3100
+  log_level: info
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  replication_factor: 1
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb          # the current index format
+      object_store: filesystem
+      schema: v13          # required for structured metadata
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: 48h
+  # trace_id / span_id arrive as structured metadata: attached to every line and
+  # filterable (| trace_id="..."), but not indexed, so they don't create streams.
+  allow_structured_metadata: true
+  volume_enabled: true
+  # Loki indexes several OTLP resource attributes as labels by default, including
+  # service.instance.id (one value per process, so new streams on every restart).
+  # Index only service.name; everything else becomes structured metadata.
+  otlp_config:
+    resource_attributes:
+      ignore_defaults: true
+      attributes_config:
+        - action: index_label
+          attributes:
+            - service.name
+
+compactor:
+  working_directory: /loki/compactor
+  # Without this, retention_period above is never enforced.
+  retention_enabled: true
+  delete_request_store: filesystem
+
+analytics:
+  reporting_enabled: false

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Sign up · Task Manager{% endblock %}
+{% block content %}
+<div class="card auth-card">
+  <h1>Sign up</h1>
+  <form id="auth-form" data-mode="signup">
+    <label>Username <input name="username" required autocomplete="username"></label>
+    <label>Password <input name="password" type="password" required minlength="4" autocomplete="new-password"></label>
+    <p id="error" class="error"></p>
+    <button type="submit" class="btn primary full">Create account</button>
+  </form>
+  <p class="muted">Already have an account? <a href="/login/">Log in</a></p>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{% static 'js/auth.js' %}"></script>{% endblock %}

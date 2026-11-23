@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% load static %}
+{% block content %}
+<section class="card">
+  <h2 id="form-title">New task</h2>
+  <form id="task-form">
+    <input type="hidden" name="id">
+    <label>Task name <input name="task_name" required maxlength="200"></label>
+    <label>Description <textarea name="task_desc" rows="3"></textarea></label>
+    <label>Assign to
+      <select name="assigned_to"><option value="">— Nobody —</option></select>
+    </label>
+    <p id="form-error" class="error"></p>
+    <div class="row">
+      <button type="submit" class="btn primary" id="save-btn">Add task</button>
+      <button type="button" class="btn" id="cancel-btn" hidden>Cancel</button>
+    </div>
+  </form>
+</section>
+
+<section class="grid">
+  <div class="card">
+    <h2>My tasks <span class="count" id="my-count">0</span></h2>
+    <ul id="my-tasks" class="task-list"></ul>
+  </div>
+  <div class="card">
+    <h2>Assigned to me <span class="count" id="assigned-count">0</span></h2>
+    <ul id="assigned-tasks" class="task-list"></ul>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{% static 'js/tasks.js' %}"></script>{% endblock %}

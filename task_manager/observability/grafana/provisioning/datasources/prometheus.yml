@@ -1,0 +1,20 @@
+# Grafana reads this on startup and creates the data source automatically,
+# so there's nothing to click through by hand and it survives volume resets.
+apiVersion: 1
+
+# The Grafana volume is reused from an earlier setup. Remove any old
+# "Prometheus" data source first so this definition (with a fixed uid) wins.
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus          # fixed id so later dashboards can reference it
+    type: prometheus
+    access: proxy            # the Grafana server queries Prometheus, not your browser
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s      # match the scrape interval

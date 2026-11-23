@@ -1,0 +1,41 @@
+# Tempo data source, created on Grafana startup.
+# Note: Grafana expands $VARS in provisioning files, so a literal $ is written as $$.
+apiVersion: 1
+
+deleteDatasources:
+  - name: Tempo
+    orgId: 1
+
+datasources:
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      nodeGraph:
+        enabled: true
+      # Trace -> logs: from any span, open every log line (web AND worker) that
+      # carries this trace's id. trace_id is structured metadata in Loki, so it is
+      # a filter after the stream selector, not a label inside {}.
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        customQuery: true
+        query: '{service_name=~"task-manager-.+"} | trace_id="$${__trace.traceId}"'
+      # From a span, jump to the matching service's metrics in Prometheus.
+      # service.name on the span maps to the `job` label in Prometheus.
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-5m"
+        spanEndTimeShift: "5m"
+        tags:
+          - key: service.name
+            value: job
+        queries:
+          - name: Request rate
+            query: "sum by (http_route) (rate(http_server_request_duration_seconds_count{$$__tags}[1m]))"
+          - name: Task runtime p95
+            query: "histogram_quantile(0.95, sum by (le, task) (rate(flower_task_runtime_seconds_bucket{$$__tags}[5m])))"

@@ -1,0 +1,161 @@
+services:
+  # ---------------------------------------------------------------- app
+  db:
+    image: postgres:16-alpine
+    env_file: .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # host 5432 is taken by a locally installed Postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: .
+    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    env_file: .env
+    environment:
+      OTEL_SERVICE_NAME: task-manager-web
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  worker:
+    build: .
+    command: celery -A config worker -l info
+    env_file: .env
+    environment:
+      OTEL_SERVICE_NAME: task-manager-worker
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+
+  # ------------------------------------------------------ observability
+  # metrics: web/worker --OTLP/HTTP :4318--> otel-collector <--scrape :8889-- prometheus <-- grafana
+  # traces:  web/worker --OTLP/HTTP :4318--> otel-collector --OTLP/gRPC :4317--> tempo <-- grafana
+  # logs:    web/worker --OTLP/HTTP :4318--> otel-collector --OTLP/HTTP :3100--> loki  <-- grafana
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.130.0
+    restart: unless-stopped   # come back after a crash (e.g. OOM kill)
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
+    # No ports: published. Only containers on this network reach 4318 and 8889.
+    depends_on:
+      - tempo
+      - loki
+    mem_limit: 256m
+
+  # One-off: Tempo runs as user 10001, but a new named volume is owned by root.
+  # This fixes ownership, then exits; tempo waits for it to finish.
+  tempo-init:
+    image: grafana/tempo:2.8.1
+    user: root
+    entrypoint: ["chown", "10001:10001", "/var/tempo"]
+    volumes:
+      - tempo_data:/var/tempo
+
+  tempo:
+    image: grafana/tempo:2.8.1
+    restart: unless-stopped   # come back after a crash (e.g. OOM kill)
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./observability/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    # No ports: published. Collector -> tempo:4317, Grafana -> tempo:3200.
+    depends_on:
+      tempo-init:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+  # One-off: Loki also runs as user 10001; same ownership fix as tempo-init.
+  loki-init:
+    image: grafana/loki:3.5.0
+    user: root
+    entrypoint: ["chown", "-R", "10001:10001", "/loki"]
+    volumes:
+      - loki_data:/loki
+
+  loki:
+    image: grafana/loki:3.5.0
+    restart: unless-stopped   # come back after a crash (e.g. OOM kill)
+    command: ["-config.file=/etc/loki/loki.yaml"]
+    volumes:
+      - ./observability/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki_data:/loki
+    # No ports: published. Collector -> loki:3100/otlp, Grafana -> loki:3100.
+    depends_on:
+      loki-init:
+        condition: service_completed_successfully
+    mem_limit: 512m
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped   # come back after a crash (e.g. OOM kill)
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle   # allows reloading config: POST /-/reload
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - otel-collector
+    mem_limit: 512m
+
+  grafana:
+    image: grafana/grafana:12.1.0
+    restart: unless-stopped   # come back after a crash (e.g. OOM kill)
+    environment:
+      # Only these two values are passed in (not the whole .env), so the Django
+      # secret key and DB password stay out of the Grafana container.
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?set GF_SECURITY_ADMIN_PASSWORD in .env}
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+    mem_limit: 256m
+
+volumes:
+  postgres_data:
+  prometheus_data:
+  grafana_data:
+  tempo_data:
+  loki_data:

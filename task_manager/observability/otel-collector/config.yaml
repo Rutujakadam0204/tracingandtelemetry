@@ -1,0 +1,56 @@
+# OpenTelemetry Collector: one place every service sends telemetry to.
+# The apps only know "send OTLP to otel-collector:4318"; where the data goes
+# next (Prometheus for metrics, Tempo for traces, Loki for logs) is decided here,
+# not in Python code.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318   # internal only, not published to the host
+
+processors:
+  # Refuse data instead of crashing when close to the container's mem_limit (256m).
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 200
+    spike_limit_mib: 50
+  # Group data points / spans into fewer, larger sends.
+  batch: {}
+
+exporters:
+  # Serves the latest value of every metric at :8889/metrics, in the
+  # Prometheus text format, for Prometheus to scrape.
+  # service.name becomes the `job` label and service.instance.id the `instance` label.
+  # Series not updated for 5 minutes (e.g. a restarted worker process) are dropped.
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    metric_expiration: 5m
+
+  # Pushes spans to Tempo over OTLP/gRPC. Plain-text is fine inside the
+  # Docker network; Tempo isn't reachable from the host.
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Pushes log records to Loki's native OTLP endpoint (Loki 3+).
+  # Loki turns service.name into the `service_name` label and keeps trace_id,
+  # span_id and other attributes as structured metadata (not indexed labels).
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]   # memory_limiter must come first
+      exporters: [prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/loki]

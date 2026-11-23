@@ -1,0 +1,26 @@
+# Loki data source, created on Grafana startup.
+# Grafana expands $VARS in provisioning files, so a literal $ is written as $$.
+apiVersion: 1
+
+deleteDatasources:
+  - name: Loki
+    orgId: 1
+
+datasources:
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
+      # Log -> trace: read trace_id from each line's structured metadata
+      # (matcherType: label) and show a "View trace" button that opens it in Tempo.
+      derivedFields:
+        - name: trace_id
+          matcherType: label
+          matcherRegex: trace_id
+          datasourceUid: tempo
+          url: "$${__value.raw}"
+          urlDisplayLabel: View trace

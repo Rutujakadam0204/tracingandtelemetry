@@ -1,0 +1,16 @@
+# Dashboards as code: Grafana loads every JSON file in the folder below on startup
+# (and re-checks it every 30 s), so dashboards are version-controlled and survive
+# a wiped Grafana volume - the same idea as the data source provisioning.
+apiVersion: 1
+
+providers:
+  - name: task-manager
+    folder: Task Manager
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    # Edits made in the UI can't be saved over a file-provisioned dashboard: change the
+    # JSON instead (or "Save as" a copy in the UI to experiment).
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
